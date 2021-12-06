@@ -9,6 +9,7 @@ from transformers import BertTokenizer, AutoTokenizer
 import numpy as np
 from Client.model_utils import ClientModel
 from Service.model_utils import SeviceModel
+import copy
 
 
 if __name__ == '__main__':
@@ -31,7 +32,16 @@ if __name__ == '__main__':
 
     output = client_model(token_ids, attention_masks, token_type_ids)
 
-    print(output[0])
+    # print(output[0][0])
+    input = output[0].detach().clone()#.requires_grad_(True)
+    input.requires_grad = True
+    # print(input)
     service_model = SeviceModel(bert_dir=bert_dir, dropout_prob=0.1, k=2)
-    output = service_model(inputs_embeds=output[0], attention_mask=attention_masks, token_type_ids=token_type_ids)
-    print(output[0])
+    labels = torch.ones(attention_masks.size()[0], attention_masks.size()[1]).view(-1).long()
+    output = service_model(inputs_embeds=input, attention_mask=attention_masks, token_type_ids=token_type_ids, labels=labels)
+    # print(output[1])
+    loss = output[1]
+    loss.backward()
+    # print(output[0])
+    gradient = input.grad.data
+    print(gradient.size())
