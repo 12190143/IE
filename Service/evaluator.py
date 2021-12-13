@@ -11,16 +11,14 @@ import torch
 import logging
 import numpy as np
 from tqdm import tqdm
-from evaluator import evaluation
 logger = logging.getLogger(__name__)
 
 
-def get_base_out(client_model, service_model, loader, device, task_type):
+def get_base_out(model, loader, device, task_type):
     """
     每一个任务的 forward 都一样，封装起来
     """
-    client_model.eval()
-    service_model.eval()
+    model.eval()
 
     with torch.no_grad():
         for idx, _batch in enumerate(tqdm(loader, desc=f'Get {task_type} task predict logits')):
@@ -148,7 +146,7 @@ def get_p_r_f(tp, fp, fn):
     return np.array([p, r, f1])
 
 
-def evaluation(client_model, service_model, dev_info, device, **kwargs):
+def evaluation(model, dev_info, device, **kwargs):
     """
     线下评估 trigger 模型
     """
@@ -156,7 +154,7 @@ def evaluation(client_model, service_model, dev_info, device, **kwargs):
 
     pred_logits = None
 
-    for tmp_pred in get_base_out(client_model, service_model, dev_loader, device):
+    for tmp_pred in get_base_out(model, dev_loader, device):
         tmp_pred = tmp_pred[0].cpu().numpy()
 
         if pred_logits is None:

@@ -7,8 +7,6 @@ import logging
 from torch.utils.data import DataLoader, RandomSampler
 from transformers import AdamW, get_linear_schedule_with_warmup
 from functions_utils import load_model_and_parallel
-from evaluator import evaluation
-
 
 logger = logging.getLogger(__name__)
 
@@ -74,26 +72,51 @@ def build_optimizer_and_scheduler(opt, model, t_total):
     return optimizer, scheduler
 
 
-def train_best(opt, service_model, client_model, train_dataset, dev_info, info_dict):
+def train_batch(opt, client_model, client_optimizer, client_scheduler, batch_data, use_n_gpus=False):
+    client_model.train()
+    # for key in batch_data.keys():
+    #     batch_data[key] = batch_data[key].to(device)
+    # try:
+    output = client_model(input_ids=batch_data['input_ids'], attention_mask=batch_data['attention_mask'],
+                          token_type_ids=batch_data['token_type_ids'])[0]
+    loss = torch.mean(output[0] * batch_data['gradient'])
+    loss.backward()
+    if use_n_gpus:
+        loss = loss.mean()
+
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(client_model.parameters(), opt.max_grad_norm)
+
+    client_optimizer.step()
+    client_scheduler.step()
+    client_model.zero_grad()
+    return loss
+
+
+def forward_batch(client_model, batch_data):
+    client_model.eval()
+    with torch.no_grad:
+        output = client_model(input_ids=batch_data['input_ids'], attention_mask=batch_data['attention_mask'],
+                              token_type_ids=batch_data['token_type_ids'])[0]
+    return output
+
+
+def train_best(opt, client_model, train_dataset):
     train_sampler = RandomSampler(train_dataset)
 
     train_loader = DataLoader(dataset=train_dataset,
                               batch_size=opt.train_batch_size,
                               sampler=train_sampler,
                               num_workers=8)
-
-    service_model, device = load_model_and_parallel(service_model, opt.gpu_ids)
     client_model, device = load_model_and_parallel(client_model, opt.gpu_ids)
 
     use_n_gpus = False
-    if hasattr(service_model, "module"):
+    if hasattr(client_model, "module"):
         use_n_gpus = True
 
     t_total = len(train_loader) * opt.train_epochs
 
     client_optimizer, client_scheduler = build_optimizer_and_scheduler(opt, client_model, t_total)
-    service_optimizer, service_scheduler = build_optimizer_and_scheduler(opt, service_model, t_total)
-
 
     # Train
     logger.info("***** Running training *****")
@@ -105,7 +128,6 @@ def train_best(opt, service_model, client_model, train_dataset, dev_info, info_d
     global_step = 0
 
     client_model.zero_grad()
-    service_model.zero_grad()
 
     save_steps = t_total // opt.train_epochs
     eval_steps = save_steps
@@ -115,29 +137,11 @@ def train_best(opt, service_model, client_model, train_dataset, dev_info, info_d
     log_loss_steps = 20
 
     avg_loss = 0.
-    max_f1 = 0.
-    max_f1_step = 0
-    metric_str = ''
     for epoch in range(opt.train_epochs):
         for step, batch_data in enumerate(train_loader):
-            client_model.train()
-            for key in batch_data.keys():
-                batch_data[key] = batch_data[key].to(device)
-            # try:
-            loss = client_model(**batch_data)[0]
-            # except:
-            #     print(batch_data)
-            #     continue
-
-            if use_n_gpus:
-                loss = loss.mean()
-
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(client_model.parameters(), opt.max_grad_norm)
-
-            client_optimizer.step()
-            client_scheduler.step()
-            client_model.zero_grad()
+            # client_model.train()
+            loss = train_batch(opt, client_model, client_optimizer, client_scheduler, batch_data,
+                               use_n_gpus=use_n_gpus)
 
             global_step += 1
 
@@ -147,27 +151,6 @@ def train_best(opt, service_model, client_model, train_dataset, dev_info, info_d
                 avg_loss = 0.
             else:
                 avg_loss += loss.item()
-
-        tmp_metric_str, tmp_f1 = evaluation(model, dev_info, device,
-                                            start_threshold=opt.start_threshold,
-                                            end_threshold=opt.end_threshold)
-
-        logger.info(f'In epoch {epoch}: {tmp_metric_str}')
-
-        metric_str += f'In epoch {epoch}: {tmp_metric_str}' + '\n\n'
-
-        if tmp_f1 > max_f1:
-            max_f1 = tmp_f1
-            max_f1_step = epoch
-            save_model(opt, model)
-
-    max_metric_str = f'Max f1 is: {max_f1}, in epoch {max_f1_step}'
-    logger.info(max_metric_str)
-    metric_str += max_metric_str + '\n'
-    eval_save_path = os.path.join(opt.output_dir, 'eval_metric.txt')
-
-    with open(eval_save_path, 'a', encoding='utf-8') as f1:
-        f1.write(metric_str)
 
     # clear cuda cache to avoid OOM
     torch.cuda.empty_cache()

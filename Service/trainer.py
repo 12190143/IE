@@ -9,7 +9,6 @@ from transformers import AdamW, get_linear_schedule_with_warmup
 from functions_utils import load_model_and_parallel
 from evaluator import evaluation
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -74,43 +73,32 @@ def build_optimizer_and_scheduler(opt, model, t_total):
     return optimizer, scheduler
 
 
-def train_bacth(opt, service_model, batch_data, dev_info, info_dict):
-    service_model, device = load_model_and_parallel(service_model, opt.gpu_ids)
-
-    use_n_gpus = False
-    if hasattr(service_model, "module"):
-        use_n_gpus = True
-
-    service_model.zero_grad()
-
+def train_batch(opt, service_model, service_optimizer, service_scheduler, batch_data, use_n_gpus=False):
     service_model.train()
-    for key in batch_data.keys():
-        batch_data[key] = batch_data[key].to(device)
-    batch_data['inputs_embeds'].requires_grad_(True)
-    # try:
-    output, loss = service_model(**batch_data)[0]
-    # except:
-    #     print(batch_data)
-    #     continue
+    batch_data['inputs_embeds'].requires_grad = True
 
+    output, loss = service_model(inputs_embeds=batch_data['inputs_embeds'], attention_mask=batch_data['attention_mask'],
+                                 token_type_ids=batch_data['token_type_ids'], labels=batch_data['labels'])
     if use_n_gpus:
         loss = loss.mean()
 
     loss.backward()
-    gradient = batch_data['inputs_embeds'].weight.grad
     torch.nn.utils.clip_grad_norm_(service_model.parameters(), opt.max_grad_norm)
-
-    service_model.step()
-    service_model.step()
+    gradient = batch_data['inputs_embeds'].grad.data.clone()
+    service_optimizer.step()
+    service_scheduler.step()
     service_model.zero_grad()
-
-    # clear cuda cache to avoid OOM
-    torch.cuda.empty_cache()
-
-    logger.info('Train done')
+    return gradient, loss
 
 
-def train_best(opt, service_model, train_dataset, dev_info, info_dict):
+def forward_batch(service_model, batch_data):
+    service_model.eval()
+    output = service_model(inputs_embeds=batch_data['inputs_embeds'], attention_mask=batch_data['attention_mask'],
+                           token_type_ids=batch_data['token_type_ids'])[0]
+    return output
+
+
+def train_best(opt, service_model, train_dataset, dev_info):
     train_sampler = RandomSampler(train_dataset)
 
     train_loader = DataLoader(dataset=train_dataset,
@@ -152,25 +140,8 @@ def train_best(opt, service_model, train_dataset, dev_info, info_dict):
     metric_str = ''
     for epoch in range(opt.train_epochs):
         for step, batch_data in enumerate(train_loader):
-            service_model.train()
-            for key in batch_data.keys():
-                batch_data[key] = batch_data[key].to(device)
-            # try:
-            output, loss = service_model(**batch_data)[0]
-            # except:
-            #     print(batch_data)
-            #     continue
-
-            if use_n_gpus:
-                loss = loss.mean()
-
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(service_model.parameters(), opt.max_grad_norm)
-
-            service_model.step()
-            service_model.step()
-            service_model.zero_grad()
-
+            gradient, loss = train_bacth(opt, service_model, service_optimizer, service_scheduler, batch_data,
+                                         use_n_gpus)
             global_step += 1
 
             if global_step % log_loss_steps == 0:

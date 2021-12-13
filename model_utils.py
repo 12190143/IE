@@ -30,18 +30,23 @@ if __name__ == '__main__':
     attention_masks = torch.Tensor(np.array([encode_dict['attention_mask']], dtype='int64')).long()
     token_type_ids = torch.Tensor(np.array([encode_dict['token_type_ids']], dtype='int64')).long()
 
-    output = client_model(token_ids, attention_masks, token_type_ids)
+    client_output = client_model(token_ids, attention_masks, token_type_ids)
 
     # print(output[0][0])
-    input = output[0].detach().clone()#.requires_grad_(True)
+    input = client_output[0].detach().clone()#.requires_grad_(True)
     input.requires_grad = True
+    # input = output[0][0]
     # print(input)
     service_model = SeviceModel(bert_dir=bert_dir, dropout_prob=0.1, k=2)
     labels = torch.ones(attention_masks.size()[0], attention_masks.size()[1]).view(-1).long()
-    output = service_model(inputs_embeds=input, attention_mask=attention_masks, token_type_ids=token_type_ids, labels=labels)
+    service_output = service_model(inputs_embeds=input, attention_mask=attention_masks, token_type_ids=token_type_ids, labels=labels)
     # print(output[1])
-    loss = output[1]
-    loss.backward()
+    loss_service = service_output[1]
+    loss_service.backward()
     # print(output[0])
-    gradient = input.grad.data
-    print(gradient.size())
+
+    gradient = input.grad.data.clone()
+    # print(gradient.size(), client_output[0].size())
+    loss_client = torch.mean(client_output[0]*gradient)
+    print(loss_client, loss_service)
+    loss_client.backward()

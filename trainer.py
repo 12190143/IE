@@ -8,7 +8,9 @@ from torch.utils.data import DataLoader, RandomSampler
 from transformers import AdamW, get_linear_schedule_with_warmup
 from functions_utils import load_model_and_parallel
 from evaluator import evaluation
-
+from Service.trainer import train_batch as service_train_batch
+from Client.trainer import train_batch as client_train_batch
+from Client.trainer import forward_batch as client_forward_batch
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +96,6 @@ def train_best(opt, service_model, client_model, train_dataset, dev_info, info_d
     client_optimizer, client_scheduler = build_optimizer_and_scheduler(opt, client_model, t_total)
     service_optimizer, service_scheduler = build_optimizer_and_scheduler(opt, service_model, t_total)
 
-
     # Train
     logger.info("***** Running training *****")
     logger.info(f"  Num Examples = {len(train_dataset)}")
@@ -123,21 +124,15 @@ def train_best(opt, service_model, client_model, train_dataset, dev_info, info_d
             client_model.train()
             for key in batch_data.keys():
                 batch_data[key] = batch_data[key].to(device)
-            # try:
-            loss = client_model(**batch_data)[0]
-            # except:
-            #     print(batch_data)
-            #     continue
 
-            if use_n_gpus:
-                loss = loss.mean()
-
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(client_model.parameters(), opt.max_grad_norm)
-
-            client_optimizer.step()
-            client_scheduler.step()
-            client_model.zero_grad()
+            client_output = client_forward_batch(client_model, device)
+            service_input = client_output[0].detach().clone()  # .requires_grad_(True)
+            service_input.requires_grad = True
+            batch_data['inputs_embeds'] = service_input
+            gradient, loss = service_train_batch(opt, service_model, service_optimizer, service_scheduler, batch_data,
+                                                 use_n_gpus)
+            loss = client_train_batch(opt, client_model, client_optimizer, client_scheduler, batch_data,
+                                      use_n_gpus=use_n_gpus)
 
             global_step += 1
 
