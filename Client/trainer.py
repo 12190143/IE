@@ -79,23 +79,23 @@ def train_batch(opt, client_model, client_optimizer, client_scheduler, batch_dat
     # try:
     output = client_model(input_ids=batch_data['input_ids'], attention_mask=batch_data['attention_mask'],
                           token_type_ids=batch_data['token_type_ids'])[0]
-    loss = torch.mean(output[0] * batch_data['gradient'])
-    loss.backward()
-    if use_n_gpus:
-        loss = loss.mean()
-
-    loss.backward()
+    output.backward(batch_data['gradient'])
+    # torch.autograd.backward(output[0], batch_data['gradient'])
+    # loss = torch.mean(output[0] * batch_data['gradient'])
+    # if use_n_gpus:
+    #     loss = loss.mean()
+    # loss.backward()
     torch.nn.utils.clip_grad_norm_(client_model.parameters(), opt.max_grad_norm)
 
     client_optimizer.step()
     client_scheduler.step()
     client_model.zero_grad()
-    return loss
+    return None
 
 
 def forward_batch(client_model, batch_data):
     client_model.eval()
-    with torch.no_grad:
+    with torch.no_grad():
         output = client_model(input_ids=batch_data['input_ids'], attention_mask=batch_data['attention_mask'],
                               token_type_ids=batch_data['token_type_ids'])[0]
     return output
@@ -140,8 +140,7 @@ def train_best(opt, client_model, train_dataset):
     for epoch in range(opt.train_epochs):
         for step, batch_data in enumerate(train_loader):
             # client_model.train()
-            loss = train_batch(opt, client_model, client_optimizer, client_scheduler, batch_data,
-                               use_n_gpus=use_n_gpus)
+            loss = train_batch(opt, client_model, client_optimizer, client_scheduler, batch_data, use_n_gpus=use_n_gpus)
 
             global_step += 1
 

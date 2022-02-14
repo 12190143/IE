@@ -84,3 +84,72 @@ def get_model_path_list(base_dir):
 
     return model_lists
 
+
+def tensor_to_list(data):
+    for key in data.keys():
+        data[key] = data[key].cpu().detach().numpy().tolist()
+    return data
+
+
+def tensor_to_array(data, data_type=np.float32):
+    for key in data.keys():
+        if key == "inputs_embeds" or key == "gradient":
+            data[key] = np.array(data[key].cpu().detach().numpy(), dtype=data_type)
+        else:
+            data[key] = data[key].cpu().detach().numpy()
+    return data
+
+
+def list_to_tensor(data, device=None):
+    if device:
+        for key in data.keys():
+            if key == "inputs_embeds" or key == "gradient":
+                data[key] = torch.tensor(np.array(data[key])).float().to(device)
+            else:
+                data[key] = torch.tensor(np.array(data[key])).to(device)
+            # print(data[key].dtype)
+    else:
+        for key in data.keys():
+            if key == "inputs_embeds" or key == "gradient":
+                data[key] = torch.tensor(np.array(data[key])).float()
+            else:
+                data[key] = torch.tensor(np.array(data[key]))
+    return data
+
+
+def array_to_tensor(data, device=None):
+    if device:
+        for key in data.keys():
+            if key == "inputs_embeds" or key == "gradient":
+                data[key] = torch.tensor(data[key]).float().to(device)
+            else:
+                data[key] = torch.tensor(data[key]).to(device)
+            # print(data[key].dtype)
+    else:
+        for key in data.keys():
+            if key == "inputs_embeds" or key == "gradient":
+                data[key] = torch.tensor(data[key]).float()
+            else:
+                data[key] = torch.tensor(data[key])
+    return data
+
+
+def save_model(opt, model, global_step=None, type_name='client'):
+    if global_step is None:
+        output_dir = os.path.join(opt.output_dir, 'checkpoint-best')
+    else:
+        output_dir = os.path.join(opt.output_dir, 'checkpoint-{}'.format(global_step))
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+    else:
+        pass
+        # shutil.rmtree(output_dir)
+        # # os.rmdir(os.path.join(output_dir, 'model.pt'))
+        # os.makedirs(output_dir, exist_ok=True)
+
+    # take care of model distributed / parallel training
+    model_to_save = (
+        model.module if hasattr(model, "module") else model
+    )
+    print(f'Saving model & optimizer & scheduler checkpoint to {output_dir}')
+    torch.save(model_to_save.state_dict(), os.path.join(output_dir, '{}_model.pt'.format(type_name)))

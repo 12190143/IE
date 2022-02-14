@@ -12,7 +12,7 @@ class BaseDataset(Dataset):
         self.token_type_ids = [torch.tensor(example.token_type_ids).long() for example in features]
 
         self.labels = None
-        if mode == 'train':
+        if mode == 'train' or mode == 'dev':
             self.labels = [torch.tensor(example.labels) for example in features]
 
     def __len__(self):
@@ -26,8 +26,8 @@ class MyDataset(BaseDataset):
         super(MyDataset, self).__init__(features, mode)
 
     def __getitem__(self, index):
-        data = {'token_ids': self.token_ids[index],
-                'attention_masks': self.attention_masks[index],
+        data = {'input_ids': self.token_ids[index],
+                'attention_mask': self.attention_masks[index],
                 'token_type_ids': self.token_type_ids[index]}
 
         if self.labels is not None:

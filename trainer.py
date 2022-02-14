@@ -15,7 +15,7 @@ from Client.trainer import forward_batch as client_forward_batch
 logger = logging.getLogger(__name__)
 
 
-def save_model(opt, model, global_step=None):
+def save_model(opt, model, global_step=None, type_name='client'):
     if global_step is None:
         output_dir = os.path.join(opt.output_dir, 'checkpoint-best')
     else:
@@ -23,16 +23,17 @@ def save_model(opt, model, global_step=None):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
     else:
-        shutil.rmtree(output_dir)
-        # os.rmdir(os.path.join(output_dir, 'model.pt'))
-        os.makedirs(output_dir, exist_ok=True)
+        pass
+        # shutil.rmtree(output_dir)
+        # # os.rmdir(os.path.join(output_dir, 'model.pt'))
+        # os.makedirs(output_dir, exist_ok=True)
 
     # take care of model distributed / parallel training
     model_to_save = (
         model.module if hasattr(model, "module") else model
     )
     logger.info(f'Saving model & optimizer & scheduler checkpoint to {output_dir}')
-    torch.save(model_to_save.state_dict(), os.path.join(output_dir, 'model.pt'))
+    torch.save(model_to_save.state_dict(), os.path.join(output_dir, '{}_model.pt'.format(type_name)))
 
 
 def build_optimizer_and_scheduler(opt, model, t_total):
@@ -49,7 +50,7 @@ def build_optimizer_and_scheduler(opt, model, t_total):
 
     for name, para in model_param:
         space = name.split('.')
-        if space[0] == 'bert_module':
+        if space[0] == 'bert_module' or space[0] == "client_model" or space[0] == 'service_model':
             bert_param_optimizer.append((name, para))
         else:
             other_param_optimizer.append((name, para))
@@ -76,7 +77,7 @@ def build_optimizer_and_scheduler(opt, model, t_total):
     return optimizer, scheduler
 
 
-def train_best(opt, service_model, client_model, train_dataset, dev_info, info_dict):
+def train_best(opt, client_model, service_model, train_dataset, dev_info, info_dict):
     train_sampler = RandomSampler(train_dataset)
 
     train_loader = DataLoader(dataset=train_dataset,
@@ -124,47 +125,49 @@ def train_best(opt, service_model, client_model, train_dataset, dev_info, info_d
             client_model.train()
             for key in batch_data.keys():
                 batch_data[key] = batch_data[key].to(device)
+                # print(key)
 
-            client_output = client_forward_batch(client_model, device)
-            service_input = client_output[0].detach().clone()  # .requires_grad_(True)
+            client_output = client_forward_batch(client_model, batch_data)
+            service_input = client_output.detach().clone()  # .requires_grad_(True)
             service_input.requires_grad = True
-            batch_data['inputs_embeds'] = service_input
+            batch_data['inputs_embeds'] = service_input.to(device)
             gradient, loss = service_train_batch(opt, service_model, service_optimizer, service_scheduler, batch_data,
                                                  use_n_gpus)
+            batch_data['gradient'] = gradient
             loss = client_train_batch(opt, client_model, client_optimizer, client_scheduler, batch_data,
                                       use_n_gpus=use_n_gpus)
 
             global_step += 1
 
-            if global_step % log_loss_steps == 0:
-                avg_loss /= log_loss_steps
-                logger.info('Step: %d / %d ----> total loss: %.5f' % (global_step, t_total, avg_loss))
-                avg_loss = 0.
-            else:
-                avg_loss += loss.item()
+            # if global_step % log_loss_steps == 0:
+            #     avg_loss /= log_loss_steps
+            #     logger.info('Step: %d / %d ----> total loss: %.5f' % (global_step, t_total, avg_loss))
+            #     avg_loss = 0.
+            # else:
+            #     avg_loss += loss.item()
 
-        tmp_metric_str, tmp_f1 = evaluation(model, dev_info, device,
-                                            start_threshold=opt.start_threshold,
-                                            end_threshold=opt.end_threshold)
+        tmp_metric_str, tmp_f1, tmp_f1_bio = evaluation(client_model, service_model, dev_info, device)
 
         logger.info(f'In epoch {epoch}: {tmp_metric_str}')
-
         metric_str += f'In epoch {epoch}: {tmp_metric_str}' + '\n\n'
 
-        if tmp_f1 > max_f1:
-            max_f1 = tmp_f1
+        if tmp_f1_bio > max_f1:
+            max_f1 = tmp_f1_bio
             max_f1_step = epoch
-            save_model(opt, model)
+            save_model(opt, client_model, type_name='client')
+            save_model(opt, service_model, type_name='service')
 
     max_metric_str = f'Max f1 is: {max_f1}, in epoch {max_f1_step}'
     logger.info(max_metric_str)
     metric_str += max_metric_str + '\n'
     eval_save_path = os.path.join(opt.output_dir, 'eval_metric.txt')
-
+    if not os.path.exists(opt.output_dir):
+        os.makedirs(opt.output_dir)
     with open(eval_save_path, 'a', encoding='utf-8') as f1:
         f1.write(metric_str)
 
     # clear cuda cache to avoid OOM
-    torch.cuda.empty_cache()
+    # with torch.cuda.device('cuda:{}'.format(opt.gpu_ids[0])):
+    #     torch.cuda.empty_cache()
 
     logger.info('Train done')

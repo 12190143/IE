@@ -140,7 +140,7 @@ def train_best(opt, service_model, train_dataset, dev_info):
     metric_str = ''
     for epoch in range(opt.train_epochs):
         for step, batch_data in enumerate(train_loader):
-            gradient, loss = train_bacth(opt, service_model, service_optimizer, service_scheduler, batch_data,
+            gradient, loss = train_batch(opt, service_model, service_optimizer, service_scheduler, batch_data,
                                          use_n_gpus)
             global_step += 1
 

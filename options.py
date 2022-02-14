@@ -11,7 +11,7 @@ class BaseArgs:
     @staticmethod
     def initialize(parser: argparse.ArgumentParser):
         # args for path
-        parser.add_argument('--raw_data_dir', default='',
+        parser.add_argument('--raw_data_dir', default='./data/',
                             help='the data dir of raw data')
 
         parser.add_argument('--mid_data_dir', default='',
@@ -20,17 +20,21 @@ class BaseArgs:
         parser.add_argument('--output_dir', default='./out/',
                             help='the output dir for model checkpoints')
 
-        parser.add_argument('--bert_dir', default='../bert/torch_roberta_wwm',
+        # parser.add_argument('--bert_dir', default='/Users/jiezhou/Desktop/其他/张旗/bert_embedding/bert-base-chinese/',
+        #                     help='bert dir for ernie / roberta-wwm / uer / semi-bert')
+        parser.add_argument('--bert_dir', default='/workspace/IE/bert_base-chinese/',
                             help='bert dir for ernie / roberta-wwm / uer / semi-bert')
 
-        parser.add_argument('--bert_type', default='roberta_wwm',
+        parser.add_argument('--bert_type', default='bert_base_chinese',
                             help='roberta_wwm / ernie_1 / uer_large for bert')
 
-        parser.add_argument('--dataset', default='opener_en',
+        parser.add_argument('--dataset', default='MSRANER',
                             help='')
+        # parser.add_argument('--dataset', default='cluener_public',
+        #                     help='')
 
         # other args
-        parser.add_argument('--gpu_ids', type=str, default='0',
+        parser.add_argument('--gpu_ids', type=str, default='3',
                             help='gpu ids to use, -1 for cpu, "1, 3" for multi gpu')
 
         parser.add_argument('--mode', type=str, default='train',
@@ -41,9 +45,11 @@ class BaseArgs:
 
         # args used for train / dev
 
-        parser.add_argument('--max_seq_len', default=256, type=int)
+        parser.add_argument('--max_seq_len', default=128, type=int)
 
-        parser.add_argument('--eval_batch_size', default=64, type=int)
+        parser.add_argument('--t_total', default=1000, type=int)
+
+        parser.add_argument('--eval_batch_size', default=32, type=int)
 
         parser.add_argument('--start_threshold', default=0.5, type=float,
                             help='threshold of entity start when decoding')
@@ -64,7 +70,7 @@ class TrainArgs(BaseArgs):
     def initialize(parser: argparse.ArgumentParser):
         parser = BaseArgs.initialize(parser)
 
-        parser.add_argument('--train_epochs', default=10, type=int,
+        parser.add_argument('--train_epochs', default=30, type=int,
                             help='Max training epoch')
 
         parser.add_argument('--dropout_prob', default=0.1, type=float,
@@ -85,9 +91,9 @@ class TrainArgs(BaseArgs):
 
         parser.add_argument('--adam_epsilon', default=1e-8, type=float)
 
-        parser.add_argument('--train_batch_size', default=64, type=int)
+        parser.add_argument('--train_batch_size', default=32, type=int)
 
-        parser.add_argument('--eval_model', default=False, action='store_true',
+        parser.add_argument('--eval_model', default=True, action='store_true',
                             help='whether to eval model after training')
 
         return parser
@@ -99,10 +105,6 @@ class DevArgs(BaseArgs):
         parser = BaseArgs.initialize(parser)
 
         parser.add_argument('--dev_dir', type=str, help='dev model dir')
-
-        # used for preliminary data forward
-        parser.add_argument('--dev_dir_trigger', type=str, help='dev model dir')
-        parser.add_argument('--dev_dir_role', type=str, help='dev model dir')
 
         return parser
 
@@ -117,10 +119,10 @@ class TestArgs(BaseArgs):
 
         parser.add_argument('--submit_dir', default='./submit', type=str)
 
-        parser.add_argument('--ckpt_dir', required=True, type=str)
-
-        parser.add_argument('--start_threshold', default=0.5, type=float)
-
-        parser.add_argument('--end_threshold', default=0.5, type=float)
+        # parser.add_argument('--ckpt_dir', required=True, type=str)
+        #
+        # parser.add_argument('--start_threshold', default=0.5, type=float)
+        #
+        # parser.add_argument('--end_threshold', default=0.5, type=float)
 
         return parser
